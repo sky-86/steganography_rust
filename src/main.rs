@@ -1,9 +1,10 @@
 use std::convert::TryFrom;
+use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::Read;
 use std::io::Write;
-use std::env;
+use std::num::ParseIntError;
 
 // takes the img path, returns the bytes of the img
 fn read_bytes(filename: String) -> Vec<u8> {
@@ -16,10 +17,11 @@ fn read_bytes(filename: String) -> Vec<u8> {
 
 // convert a string into binary
 fn string_to_binary(s: &String) -> String {
+    println!("string: {}", s);
     let mut binary = String::new();
 
     for c in s.clone().into_bytes() {
-        binary += &format!("0{:b}", c);
+        binary += &format!("{:0>8}", &format!("0{:b}", c));
     }
     binary
 }
@@ -79,45 +81,137 @@ fn encode_bit(bit: &u8, bin: char) -> u8 {
     }
 }
 
-fn encode_loop() {
-    let img_bytes = read_bytes(String::from("test_p6.ppm"));
+fn encode_loop(og_img_path: &String, new_img_path: &String, user_msg: &String) {
+    // read img bytes
+    let img_bytes = read_bytes(og_img_path.to_string());
 
-    // get an array for each line in the img file
+    // get an array of bytes for each line in the img file
     let mut lines: Vec<_> = img_bytes.split_inclusive(|x| *x == 10).collect();
 
+    // gets the array of pixels
     let pixels = lines.pop().unwrap();
 
-    let msg = string_to_binary(&String::from("Hello World"));
+    // convert message into binary string
+    let msg = string_to_binary(&user_msg);
+    // create a binary header string
     let msg_header = create_msg_header(&u16::try_from(msg.len()).unwrap(), &32);
 
+    // encodes pixels with the msg_header and the msg
     let mut new_pixels = encode_msg(&pixels, &msg_header, &msg);
 
+    // create a new vector to hold the new img
     let mut new_img: Vec<u8> = Vec::new();
 
+    // add all the old img data, (except the pixels) to the new array
     for l in lines {
         new_img.extend_from_slice(l);
     }
+    // add the modified pixels
     new_img.append(&mut new_pixels);
 
-    let mut buffer = File::create("new_img.ppm").expect("Error creating file");
+    // save the img
+    let mut buffer = File::create(new_img_path).expect("Error creating file");
+    buffer.write_all(&new_img).expect("error saving");
+}
 
-    buffer.write_all(&new_img);
+fn decode_loop(og_img_path: &String) {
+    // read img bytes
+    let img_bytes = read_bytes(og_img_path.to_string());
+
+    // get an array of bytes for each line in the img file
+    let mut lines: Vec<_> = img_bytes.split_inclusive(|x| *x == 10).collect();
+
+    // gets the array of pixels
+    let pixels = lines.pop().unwrap();
+
+    // msg header in binary
+    let msg_header: Vec<&u8> = pixels.into_iter().take(32).collect();
+
+    // extracts the binary data from the pixels
+    let mut bin_msg_header = String::new();
+    for c in msg_header {
+        if c % 2 == 0 {
+            bin_msg_header.push('0');
+        } else {
+            bin_msg_header.push('1');
+        }
+    }
+
+    // length of the hidden message and the starting bit
+    let msg_length: u16 = u16::from_str_radix(&bin_msg_header[0..16], 2).unwrap();
+    let msg_depth: u16 = u16::from_str_radix(&bin_msg_header[16..32], 2).unwrap();
+
+    // extract binary data and build binary message
+    let msg_pixels: Vec<&u8> = pixels
+        .into_iter()
+        .skip(msg_depth.into())
+        .take(msg_length.into())
+        .collect();
+
+    println!("msg_pixels_length: {}", msg_pixels.len());
+    println!("msg_length: {}", msg_length);
+
+    let mut bin_msg = String::new();
+    for c in msg_pixels {
+        if c % 2 == 0 {
+            bin_msg.push('0');
+        } else {
+            bin_msg.push('1');
+        }
+    }
+
+    // convert binary message into a ascii string
+    let msg: String = String::from_utf8(bin_string_to_ascii(&bin_msg).unwrap()).unwrap();
+    println!("msg: {}", msg);
+}
+
+fn bin_string_to_ascii(bin_str: &String) -> Result<Vec<u8>, ParseIntError> {
+    println!("length: {}", bin_str.len());
+    (0..bin_str.len())
+        .step_by(8)
+        .map(|i| u8::from_str_radix(&bin_str[i..i + 8], 2))
+        .collect()
 }
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    // collect the args
+    let mut args = env::args();
+    let _exe_path = args.next();
 
-    let flag = &args[1];
+    // check for flag
+    let flag;
+    match args.next() {
+        Some(x) => flag = x,
+        None => {
+            println!("Provide a flag");
+            return;
+        }
+    }
 
-    if flag == '-r' {
+    if flag == "-r" {
         // read flag, decode
         // take one param, the img path
-
-    } else if flag == '-w' {
+        let og_img_path = &args.next().expect("Provide a image path");
+        decode_loop(og_img_path);
+    } else if flag == "-w" {
         // write flag, encode
-        // takes two params, og img and the new img path
-        
-        
+        // takes multiple params, og img, new img, msg, depth
+
+        // get paths from args
+        let og_img_path = &args.next().expect("Provide a image path");
+        let new_img_path = &args.next().expect("Provide a save location");
+
+        // since args are split by spaces, extra work has to be done to get full msg
+        let args_len = &args.len();
+        let mut user_msg = String::new();
+        for (i, mut s) in args.enumerate() {
+            if i + 1 != *args_len {
+                s.push(' ');
+            }
+            user_msg.push_str(&s);
+        }
+
+        encode_loop(og_img_path, new_img_path, &user_msg);
     } else {
         // no flag give, print usage message
     }
