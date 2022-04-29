@@ -1,3 +1,4 @@
+use clap::Parser;
 use std::convert::TryFrom;
 use std::env;
 use std::fs;
@@ -173,21 +174,47 @@ fn bin_string_to_ascii(bin_str: &String) -> Result<Vec<u8>, ParseIntError> {
         .collect()
 }
 
+#[derive(Parser, Default, Debug)]
+#[clap(
+    author = "Skyler Favors",
+    version = "0.1",
+    about = "A steganography project"
+)]
+struct Arguments {
+    #[clap(short, long)]
+    img_path: String,
+}
+
 fn main() {
+    let args = Arguments::parse();
+    println!("{:?}", args);
+}
+
+fn temp() {
     // collect the args
     let mut args = env::args();
+    // first args is always the project path
     let _exe_path = args.next();
 
     // check for flag
     let flag;
     match args.next() {
-        Some(x) => flag = x,
+        Some(x) => {
+            // checks for a dash indicating a flag
+            if x.chars().nth(0).unwrap() == '-' {
+                flag = x;
+            } else {
+                println!("Provide a flag");
+                return;
+            }
+        }
         None => {
             println!("Provide a flag");
             return;
         }
     }
 
+    // possible flags
     if flag == "-r" {
         // read flag, decode
         // take one param, the img path
