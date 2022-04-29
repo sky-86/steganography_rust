@@ -10,7 +10,7 @@ use std::num::ParseIntError;
 // takes the img path, returns the bytes of the img
 fn read_bytes(filename: String) -> Vec<u8> {
     let mut contents = Vec::new();
-    let mut file = fs::File::open(&filename).expect("Error opening file");
+    let mut file = fs::File::open(&filename).expect(&filename);
     file.read_to_end(&mut contents).expect("Unable to read");
 
     contents
@@ -18,7 +18,6 @@ fn read_bytes(filename: String) -> Vec<u8> {
 
 // convert a string into binary
 fn string_to_binary(s: &String) -> String {
-    println!("string: {}", s);
     let mut binary = String::new();
 
     for c in s.clone().into_bytes() {
@@ -38,16 +37,20 @@ fn create_msg_header(length: &u16, depth: &u16) -> String {
 }
 
 // Changes the pixel values to hide the msg
-fn encode_msg(pixels: &[u8], header: &String, msg: &String) -> Vec<u8> {
-    let head = pixels.into_iter().take(32);
-    let body = pixels.into_iter().skip(32).take(msg.len());
-    let rest = pixels.into_iter().skip(32 + msg.len());
+fn encode_msg(pixels: &[u8], header: &String, msg: &String, depth: &usize) -> Vec<u8> {
+    let head = pixels.into_iter().take(*depth);
+    let body = pixels.into_iter().skip(*depth).take(msg.len());
+    let rest = pixels.into_iter().skip(*depth).skip(msg.len());
     let mut header_iter = header.chars();
     let mut msg_iter = msg.chars();
     let mut new_pixels = Vec::new();
 
-    for i in head {
-        new_pixels.push(encode_bit(i, header_iter.next().unwrap()));
+    for (i, x) in head.enumerate() {
+        if i < 32 {
+            new_pixels.push(encode_bit(x, header_iter.next().unwrap()));
+        } else {
+            new_pixels.push(*x);
+        }
     }
 
     for i in body {
@@ -82,7 +85,7 @@ fn encode_bit(bit: &u8, bin: char) -> u8 {
     }
 }
 
-fn encode_loop(og_img_path: &String, new_img_path: &String, user_msg: &String) {
+fn encode_loop(og_img_path: &String, new_img_path: &String, user_msg: &String, depth: &usize) {
     // read img bytes
     let img_bytes = read_bytes(og_img_path.to_string());
 
@@ -95,10 +98,13 @@ fn encode_loop(og_img_path: &String, new_img_path: &String, user_msg: &String) {
     // convert message into binary string
     let msg = string_to_binary(&user_msg);
     // create a binary header string
-    let msg_header = create_msg_header(&u16::try_from(msg.len()).unwrap(), &32);
+    let msg_header = create_msg_header(
+        &u16::try_from(msg.len()).unwrap(),
+        &u16::try_from(*depth).unwrap(),
+    );
 
     // encodes pixels with the msg_header and the msg
-    let mut new_pixels = encode_msg(&pixels, &msg_header, &msg);
+    let mut new_pixels = encode_msg(&pixels, &msg_header, &msg, &depth);
 
     // create a new vector to hold the new img
     let mut new_img: Vec<u8> = Vec::new();
@@ -115,9 +121,9 @@ fn encode_loop(og_img_path: &String, new_img_path: &String, user_msg: &String) {
     buffer.write_all(&new_img).expect("error saving");
 }
 
-fn decode_loop(og_img_path: &String) {
+fn decode_loop(img_path: &String) {
     // read img bytes
-    let img_bytes = read_bytes(og_img_path.to_string());
+    let img_bytes = read_bytes(img_path.to_string());
 
     // get an array of bytes for each line in the img file
     let mut lines: Vec<_> = img_bytes.split_inclusive(|x| *x == 10).collect();
@@ -149,9 +155,6 @@ fn decode_loop(og_img_path: &String) {
         .take(msg_length.into())
         .collect();
 
-    println!("msg_pixels_length: {}", msg_pixels.len());
-    println!("msg_length: {}", msg_length);
-
     let mut bin_msg = String::new();
     for c in msg_pixels {
         if c % 2 == 0 {
@@ -163,11 +166,10 @@ fn decode_loop(og_img_path: &String) {
 
     // convert binary message into a ascii string
     let msg: String = String::from_utf8(bin_string_to_ascii(&bin_msg).unwrap()).unwrap();
-    println!("msg: {}", msg);
+    println!("Hidden Message: {}", msg);
 }
 
 fn bin_string_to_ascii(bin_str: &String) -> Result<Vec<u8>, ParseIntError> {
-    println!("length: {}", bin_str.len());
     (0..bin_str.len())
         .step_by(8)
         .map(|i| u8::from_str_radix(&bin_str[i..i + 8], 2))
@@ -181,65 +183,29 @@ fn bin_string_to_ascii(bin_str: &String) -> Result<Vec<u8>, ParseIntError> {
     about = "A steganography project"
 )]
 struct Arguments {
-    #[clap(short, long)]
+    #[clap(forbid_empty_values = true)]
     img_path: String,
+
+    #[clap(short, long)]
+    depth: Option<usize>,
+    #[clap(short, long)]
+    save_path: Option<String>,
+    #[clap(short, long)]
+    message: Option<String>,
 }
 
 fn main() {
     let args = Arguments::parse();
-    println!("{:?}", args);
-}
 
-fn temp() {
-    // collect the args
-    let mut args = env::args();
-    // first args is always the project path
-    let _exe_path = args.next();
-
-    // check for flag
-    let flag;
-    match args.next() {
-        Some(x) => {
-            // checks for a dash indicating a flag
-            if x.chars().nth(0).unwrap() == '-' {
-                flag = x;
-            } else {
-                println!("Provide a flag");
-                return;
-            }
-        }
-        None => {
-            println!("Provide a flag");
-            return;
-        }
-    }
-
-    // possible flags
-    if flag == "-r" {
-        // read flag, decode
-        // take one param, the img path
-        let og_img_path = &args.next().expect("Provide a image path");
-        decode_loop(og_img_path);
-    } else if flag == "-w" {
-        // write flag, encode
-        // takes multiple params, og img, new img, msg, depth
-
-        // get paths from args
-        let og_img_path = &args.next().expect("Provide a image path");
-        let new_img_path = &args.next().expect("Provide a save location");
-
-        // since args are split by spaces, extra work has to be done to get full msg
-        let args_len = &args.len();
-        let mut user_msg = String::new();
-        for (i, mut s) in args.enumerate() {
-            if i + 1 != *args_len {
-                s.push(' ');
-            }
-            user_msg.push_str(&s);
-        }
-
-        encode_loop(og_img_path, new_img_path, &user_msg);
+    // check which args were given
+    // determine if it should read or write
+    if let (Some(s), Some(m), Some(d)) = (&args.save_path, &args.message, &args.depth) {
+        println!("write");
+        // stops the message from overwriting the header
+        let base = *d + 32;
+        encode_loop(&args.img_path, &s, &m, &base);
     } else {
-        // no flag give, print usage message
+        println!("read");
+        decode_loop(&args.img_path);
     }
 }
